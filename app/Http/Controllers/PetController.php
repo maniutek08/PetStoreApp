@@ -2,9 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 use App\Http\Requests\PetRequest;
+use App\Services\PetStoreService;
 
 class PetController extends Controller
 {
@@ -31,13 +30,18 @@ class PetController extends Controller
         4 => 'Duże'
     ];
 
+    protected $petStoreService;
+
+    public function __construct(PetStoreService $petStoreService)
+    {
+        $this->petStoreService = $petStoreService;
+    }
+
 
     // Lista zwierzaków
     public function index()
     {
-        $response = Http::get("{$this->apiUrl}/pet/findByStatus", [
-            'status' => 'available, pending, sold'
-        ]);
+        $response = $this->petStoreService->getPetsByStatus('available, pending, sold');
         $pets = $response->json();
 
         return view('pets.index', [
@@ -50,7 +54,7 @@ class PetController extends Controller
     public function showForm($petId = null)
     {
         if($petId) {
-            $response = Http::get("{$this->apiUrl}/pet/{$petId}");
+            $response = $this->petStoreService->getPet($petId);
             $pet = $response->json();
 
         }
@@ -72,8 +76,8 @@ class PetController extends Controller
 
         try {
 
-            $response = Http::post("{$this->apiUrl}/pet", [
-                'id' => 558,
+            $data = [
+                'id' => 0,
                 'name' => $request->name,
                 'category' => [
                     'id' => $request->category_id,
@@ -82,13 +86,17 @@ class PetController extends Controller
                 'photoUrls' => explode("\n", trim($request->photoUrls)),
                 'tags' => $tags,
                 'status' => $request->status,
-            ]);
+            ];
 
+            $response = $this->petStoreService->addPet($data);
 
+            // Jeśli dodawanie informacji o zwierzaku się powiodło to wtedy wysyłamy zdjęcie
             if($response->getStatusCode() == 200) {
 
                 // Jeśli przesłano obraz, wysyłamy go osobno
-                $this->uploadImage($request, $response->json()['id']);
+                if($request->image) {
+                    $this->petStoreService->uploadPetImage($response->json()['id'], $request->image);
+                }
 
                 session()->flash('success', 'Zwierzak został dodany');
             }
@@ -110,7 +118,7 @@ class PetController extends Controller
 
         try {
 
-            $response = Http::post("{$this->apiUrl}/pet", [
+            $data = [
                 'id' => $request->id,
                 'name' => $request->name,
                 'category' => [
@@ -120,14 +128,20 @@ class PetController extends Controller
                 'photoUrls' => explode("\n", trim($request->photoUrls)),
                 'tags' => $tags,
                 'status' => $request->status,
-            ]);
+            ];
 
+            $response = $this->petStoreService->updatePet($data);
+
+
+            // Jeśli update informacji o zwierzaku się powiodło to wtedy wysyłamy zdjęcie
             if($response->getStatusCode() == 200) {
 
                 // Jeśli przesłano obraz, wysyłamy go osobno
-                $this->uploadImage($request, $request->id);
+                if($request->image) {
+                    $this->petStoreService->uploadPetImage($response->json()['id'], $request->image);
+                }
 
-                session()->flash('success', 'Zmiany zostały zapisane');
+                session()->flash('success', 'Zwierzak został dodany');
             }
             else session()->flash('error', 'Nie udało się zapisać zmian: ' . $response->body());
 
@@ -142,7 +156,7 @@ class PetController extends Controller
     public function destroy($id)
     {
         try {
-            $response = Http::delete("{$this->apiUrl}/pet/{$id}");
+            $response = $this->petStoreService->deletePet($id);
 
             if($response->getStatusCode() == 200) session()->flash('success', 'Zwierzak został usunięty');
             else session()->flash('error', 'Nie udało się usunąć zwierzaka' . $response -> body());
@@ -167,18 +181,5 @@ class PetController extends Controller
         }
 
         return $tags;
-    }
-
-    // Metosa pomocnicza do przesyłania obrazka
-    private function uploadImage(Request $request, $petId)
-    {
-        if($request->image) {
-            $image = $request->file('image');
-            $uploadResponse = Http::attach('file', file_get_contents($image->getRealPath()), $image->getClientOriginalName())->post("{$this->apiUrl}/pet/".$petId."/uploadImage");
-
-            if($uploadResponse->getStatusCode() != 200) {
-                session()->flash('error', 'Nie udało się wgrać zdjęcia: ' . $uploadResponse->body());
-            }
-        }
     }
 }
